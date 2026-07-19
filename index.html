@@ -461,12 +461,61 @@
     }
   });
 
-  speakBtn.addEventListener('click', () => {
-    if(!('speechSynthesis' in window)) return;
-    const utter = new SpeechSynthesisUtterance(tgtText.value);
-    utter.lang = tgtLang.value;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utter);
+  // Splits text into chunks under Google's ~200 char limit, breaking on word boundaries.
+  function chunkText(text, maxLen = 190){
+    const words = text.split(/\s+/);
+    const chunks = [];
+    let current = '';
+    for(const word of words){
+      const candidate = current ? current + ' ' + word : word;
+      if(candidate.length > maxLen){
+        if(current) chunks.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if(current) chunks.push(current);
+    return chunks;
+  }
+
+  function playChunksSequentially(chunks, lang){
+    return new Promise((resolve, reject) => {
+      let i = 0;
+      const audio = new Audio();
+      audio.addEventListener('ended', playNext);
+      audio.addEventListener('error', () => reject(new Error('audio playback failed')));
+
+      function playNext(){
+        if(i >= chunks.length){ resolve(); return; }
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunks[i])}&tl=${lang}&client=tw-ob`;
+        audio.src = url;
+        i++;
+        audio.play().catch(reject);
+      }
+      playNext();
+    });
+  }
+
+  speakBtn.addEventListener('click', async () => {
+    const text = tgtText.value.trim();
+    if(!text) return;
+
+    speakBtn.disabled = true;
+    statusMsg.textContent = 'Loading audio…';
+    statusMsg.className = 'status';
+
+    try{
+      const chunks = chunkText(text);
+      await playChunksSequentially(chunks, tgtLang.value);
+      statusMsg.textContent = 'Done speaking.';
+      statusMsg.className = 'status ok';
+    } catch(err){
+      statusMsg.textContent = 'Could not play audio for this language — check your connection and try again.';
+      statusMsg.className = 'status error';
+    } finally {
+      speakBtn.disabled = false;
+    }
   });
 </script>
 </body>
